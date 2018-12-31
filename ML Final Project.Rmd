@@ -1,0 +1,185 @@
+---
+title: "Course Project Prediction Assignment"
+author: "Claudio Nicosia"
+date: "December 27, 2018"
+output: html_document
+---
+
+```{r global options, include = FALSE}
+knitr::opts_chunk$set(echo=FALSE, include = FALSE, warning=FALSE, message=FALSE)
+```
+
+
+## Project Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data source for this project: 
+
+**The WLE data set was provided generously by the following source:**
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. 
+
+Source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+
+**Training data** : https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+**Test data** : https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Goal: 
+
+The goal of this project is to predict the manner in which the observed population performed the exercise. This is the "classe" variable in the training set. Any of the other variables can be used to predict. A report will be created to describe how the model is built, how cross validation is used, what the expected out of sample error is, and why the choices were made. The final prediction model will be used to predict 20 different test cases provided within the "Test data".
+
+
+## Libraries and setup
+
+```{r Libs,  echo= TRUE, include = TRUE}
+rm(list=ls())          # Clear memory 
+library(knitr)	
+#install.packages('caret', dependencies = TRUE)
+library(caret) 
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(repmis)
+library(randomForest)
+library(corrplot)
+set.seed(12345)
+
+```
+
+## Data load and preparation
+
+```{r DataInput, echo= TRUE, include = TRUE}
+
+# Download/Read datasets
+train  <- read.csv(url("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"), na.strings = c("NA", ""))
+Qztest <- read.csv(url("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv") , na.strings = c("NA", ""))
+
+# Remove identification only variables (columns 1 to 7)
+train <- train[, -(1:7)] ; dim(train)
+Qztest  <- Qztest[, -(1:7)] ; dim(Qztest) 
+```
+The datasets have 153 remaining features including the 'classe' variable to use as the classification.
+In the next step we will eliminate those variables with NA values.
+
+```{r CleanPrep , echo= TRUE, include = TRUE}
+# Take out variables with NA values in both train and test datasets:
+trainClean  <-  train[, colSums(is.na(train)) ==0]  ; dim(trainClean) 
+QztestClean <- Qztest[, colSums(is.na(Qztest)) ==0] ; dim(QztestClean)
+```
+The 2 datasets have now 53 total features including the 'classe' dependent variable.
+In this next step we'll partition the 'train' dataset 19,622 records into Train and Test sets to be
+used in the models development. A 70 - 30 split will be used and assigned to the 'TrainSet' and 'TestSet' respectively. The first dataset will be the training data for the models, and the 'TestSet' will be used for the out-of-sample error assessment.
+
+```{r Partition  , echo= TRUE, include = TRUE}
+# Partition the training datasaet into Train and Test datasets at 70% and 30% respectively:  
+inTrain  <- createDataPartition(trainClean$classe, p=0.7, list=FALSE)
+TrainSet <- trainClean[inTrain, ]
+TestSet  <- trainClean[-inTrain, ]
+```
+
+```{r Traindim, echo= TRUE, include = TRUE}
+dim(TrainSet) # Train data : 70%
+```
+```{r Testdim, echo= TRUE, include = TRUE}
+dim(TestSet) # Test data : 30%
+```
+At this point we want to check for highly correlated variables to possibly eliminate some and reduce the unnecessary duplications of predictors for the models development.
+
+```{r CorrMtx, echo= TRUE, include = TRUE}
+# Correlation using PCA
+corrMtx <- cor(TrainSet[, -53])
+corrplot(corrMtx, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+
+```
+The Principal Component Analysis could be run next as a pre-processing, but since there aren't too many highly correlated variables, I will skip this step.  
+
+## Predictions Using 3 Different Algorithms
+Let's proceed in training data using 3 different methods and finally pick the most accurate model to score the quiz dataset provided and loaded in 'Qztest'. We'll be plotting each of the confusion matrices results from the 'TestSet' data to check and compare their respective Accuracy of the out-of-sample error.
+
+### I. Decision Tree
+
+```{r DTree, echo=TRUE, include=TRUE}
+# Decision Tree model fit
+set.seed(12345)
+mFitDTree <- rpart(classe ~ ., data=TrainSet, method="class")
+fancyRpartPlot(mFitDTree)
+
+# prediction on Test dataset
+predDTree <- predict(mFitDTree, newdata=TestSet, type="class")
+confMtxDTree <- confusionMatrix(predDTree, TestSet$classe)
+confMtxDTree
+```
+
+```{r DTreePlot, echo=TRUE, include=TRUE}
+# plot Decision Tree confusion matrix 
+plot(confMtxDTree$table, col = confMtxDTree$byClass, 
+     main = paste("Decision Tree - Accuracy =",
+                  round(confMtxDTree$overall['Accuracy'], 4)))
+```
+As we can see, the Decision Tree model does not predict the 'classe' very well and providing a 0.73 accuracy rate. Let' check the Random Forest method next:
+
+### II. Random Forest
+
+```{r RForest, echo=TRUE, include=TRUE}
+# Random Forest Model Fit
+set.seed(12345)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+mFitRF <- train(classe ~ ., data=TrainSet, method="rf", trControl=controlRF)
+mFitRF$finalModel
+```
+
+```{r RForestPred, echo=TRUE, include=TRUE}
+# Random Forest prediction on Test dataset
+predRF <- predict(mFitRF, newdata=TestSet)
+confMtxRF <- confusionMatrix(predRF, TestSet$classe)
+confMtxRF
+
+# Plot RF Matrix results
+plot(confMtxRF$table, col = confMtxRF$byClass
+     , main = paste("Random Forest - Accuracy ="
+     , round(confMtxRF$overall['Accuracy'], 4)))
+
+```
+The Random Forest is producing an excellent accuracy rate of 0.993. Before making a conclusion, we will run the last model using the GBM Gradient Boosting Method next. 
+
+### III. Gradient Boosting Method
+
+```{r GBM, echo=TRUE, include=TRUE}
+# GBM model fit
+set.seed(12345)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+mFitGBM  <- train(classe ~ ., data=TrainSet, method = "gbm", trControl = controlGBM, verbose = FALSE)
+mFitGBM$finalModel
+
+```
+
+```{r GBMPred, echo=TRUE, include=TRUE}
+# G B M prediction on Test dataset
+predGBM <- predict(mFitGBM, newdata=TestSet)
+confMtxGBM <- confusionMatrix(predGBM, TestSet$classe)
+confMtxGBM
+
+# Plot GBM matrix results
+plot(confMtxGBM$table, col = confMtxGBM$byClass
+    , main = paste("GBM - Accuracy ="
+    , round(confMtxGBM$overall['Accuracy'], 4)))
+
+```
+This last model using GBM resulted in a 0.96 Accuracy rate, which is a great accuracy, but yet smaller than the previous RF.
+
+## Conclusion
+Although the Decision Tree provides a more explainable outcome and requires less resources for computation, the Random Forest and GBM did provide a greater predicting power. We will use the Random Forest model given that it has the highest accuracy among the three methods of 0.996 and so the smallest out-of-sample error of 0.004. We will use this model for the quiz to predict the 'Qztest' dataset and with an expected 0.04% of miss-classification.
+
+
+## Predicting Results on Test data
+Scoring the 20 quiz results using the Random Forest model:
+
+```{r RFQuizScore, echo=TRUE, include=TRUE}
+QuizPrediction <- predict(mFitRF, newdata=Qztest)
+QuizPrediction
+```
+
+
+
